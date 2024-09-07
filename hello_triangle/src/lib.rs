@@ -18,7 +18,13 @@ struct Vertex {
     _color: [f32; 4],
 }
 
-fn vertex(pos: [i8; 2], _color: [f32; 4], offset: f32) -> Vertex {
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+struct TimeUniform {
+    time: f32
+}
+
+fn create_vertex(pos: [i8; 2], _color: [f32; 4], offset: f32) -> Vertex {
     let scale = 0.5;
     Vertex {
         _pos: [
@@ -31,13 +37,13 @@ fn vertex(pos: [i8; 2], _color: [f32; 4], offset: f32) -> Vertex {
     }
 }
 
-fn triangle(vertices: &mut Vec<Vertex>, indices: &mut Vec<u16>, offset: f32) {
+fn create_triangle_vertices(vertices: &mut Vec<Vertex>, indices: &mut Vec<u16>, offset: f32) {
     let base = vertices.len() as u16;
 
     vertices.extend_from_slice(&[
-        vertex([1, -1], BLUE, offset),
-        vertex([0, 1], GREEN, offset),
-        vertex([-1, -1], RED, offset),
+        create_vertex([1, -1], BLUE, offset),
+        create_vertex([0, 1], GREEN, offset),
+        create_vertex([-1, -1], RED, offset),
     ]);
 
     indices.extend([0, 1, 2].iter().map(|i| base + *i));
@@ -47,9 +53,9 @@ fn create_vertices() -> (Vec<Vertex>, Vec<u16>) {
     let mut vertices = Vec::new();
     let mut indices = Vec::new();
 
-    triangle(&mut vertices, &mut indices, 0.0);
-    triangle(&mut vertices, &mut indices, -1.0);
-    triangle(&mut vertices, &mut indices, 1.0);
+    create_triangle_vertices(&mut vertices, &mut indices, 0.0);
+    create_triangle_vertices(&mut vertices, &mut indices, -1.0);
+    create_triangle_vertices(&mut vertices, &mut indices, 1.0);
 
     println!("{:?} vertices, {:?} indices", vertices.len(), indices.len());
 
@@ -67,6 +73,10 @@ struct State<'a> {
     vertex_buffer: wgpu::Buffer,
     index_buffer: wgpu::Buffer,
     num_indices: u32,
+
+    time: f32,
+    time_buffer: wgpu::Buffer,
+    time_bind_group: wgpu::BindGroup,
 
     window: &'a Window,
 }
@@ -138,6 +148,45 @@ impl<'a> State<'a> {
             ],
         }];
 
+        let time = 1.0;
+        let time_uniform = TimeUniform { time: time };
+        let time_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Time Buffer"),
+            contents: bytemuck::cast_slice(&[time_uniform]),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST
+        });
+
+        let time_bind_group_layout = device.create_bind_group_layout(
+            &wgpu::BindGroupLayoutDescriptor {
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::VERTEX,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    }
+                ],
+                label: Some("time_bind_group_layout")
+            }
+        );
+
+        let time_bind_group = device.create_bind_group(
+            &wgpu::BindGroupDescriptor {
+                layout: &time_bind_group_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: time_buffer.as_entire_binding()
+                    }
+                ],
+                label: Some("time_bind_group")
+            }
+        );
+
         // Load the shaders from disk
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: None,
@@ -146,7 +195,7 @@ impl<'a> State<'a> {
 
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: None,
-            bind_group_layouts: &[],
+            bind_group_layouts: &[&time_bind_group_layout],
             push_constant_ranges: &[],
         });
 
@@ -186,10 +235,16 @@ impl<'a> State<'a> {
             queue,
             config,
             size,
+
             render_pipeline,
             vertex_buffer,
             index_buffer,
             num_indices,
+
+            time,
+            time_buffer,
+            time_bind_group,
+
             window,
         }
     }
@@ -211,7 +266,10 @@ impl<'a> State<'a> {
         false
     }
 
-    fn update(&mut self) {}
+    fn update(&mut self) {
+        self.time += 0.01;
+        self.queue.write_buffer(&self.time_buffer, 0, bytemuck::cast_slice(&[TimeUniform { time: self.time }]));
+    }
 
     fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
         let frame = self
@@ -240,6 +298,7 @@ impl<'a> State<'a> {
                 occlusion_query_set: None,
             });
             rpass.set_pipeline(&self.render_pipeline);
+            rpass.set_bind_group(0, &self.time_bind_group, &[]);
             rpass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
             rpass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
             rpass.draw_indexed(0..self.num_indices, 0, 0..3);
