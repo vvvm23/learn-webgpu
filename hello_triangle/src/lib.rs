@@ -32,9 +32,9 @@ fn triangle(vertices: &mut Vec<Vertex>, indices: &mut Vec<u16>, offset: f32) {
     let base = vertices.len() as u16;
 
     vertices.extend_from_slice(&[
-        vertex([-1, -1], RED, offset),
-        vertex([0, 1], GREEN, offset),
         vertex([1, -1], BLUE, offset),
+        vertex([0, 1], GREEN, offset),
+        vertex([-1, -1], RED, offset),
     ]);
 
     indices.extend([0, 1, 2].iter().map(|i| base+ *i));
