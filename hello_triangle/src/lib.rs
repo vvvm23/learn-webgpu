@@ -1,9 +1,12 @@
 use bytemuck::{Pod, Zeroable};
 use std::{borrow::Cow, mem};
-use winit::{
-    event::{ElementState, Event, KeyEvent, WindowEvent}, event_loop::EventLoop, keyboard::{PhysicalKey, KeyCode}, window::Window
-};
 use wgpu::util::DeviceExt;
+use winit::{
+    event::{ElementState, Event, KeyEvent, WindowEvent},
+    event_loop::EventLoop,
+    keyboard::{KeyCode, PhysicalKey},
+    window::Window,
+};
 
 const RED: [f32; 4] = [1.0, 0.0, 0.0, 1.0];
 const GREEN: [f32; 4] = [0.0, 1.0, 0.0, 1.0];
@@ -37,7 +40,7 @@ fn triangle(vertices: &mut Vec<Vertex>, indices: &mut Vec<u16>, offset: f32) {
         vertex([-1, -1], RED, offset),
     ]);
 
-    indices.extend([0, 1, 2].iter().map(|i| base+ *i));
+    indices.extend([0, 1, 2].iter().map(|i| base + *i));
 }
 
 fn create_vertices() -> (Vec<Vertex>, Vec<u16>) {
@@ -52,7 +55,6 @@ fn create_vertices() -> (Vec<Vertex>, Vec<u16>) {
 
     (vertices, indices)
 }
-
 
 struct State<'a> {
     surface: wgpu::Surface<'a>,
@@ -136,7 +138,6 @@ impl<'a> State<'a> {
             ],
         }];
 
-
         // Load the shaders from disk
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: None,
@@ -151,7 +152,6 @@ impl<'a> State<'a> {
 
         let swapchain_capabilities = surface.get_capabilities(&adapter);
         let swapchain_format = swapchain_capabilities.formats[0];
-
 
         let render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: None,
@@ -177,7 +177,7 @@ impl<'a> State<'a> {
             .get_default_config(&adapter, size.width, size.height)
             .unwrap();
         surface.configure(&device, &config);
-        
+
         let num_indices = index_data.len() as u32;
 
         Self {
@@ -211,37 +211,34 @@ impl<'a> State<'a> {
         false
     }
 
-    fn update(&mut self) {
-        
-    }
+    fn update(&mut self) {}
 
     fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
-        let frame = self.surface
+        let frame = self
+            .surface
             .get_current_texture()
             .expect("Failed to acquire next swap chain texture");
         let view = frame
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
-        let mut encoder =
-            self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: None,
-            });
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
         {
-            let mut rpass =
-                encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                    label: None,
-                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                        view: &view,
-                        resolve_target: None,
-                        ops: wgpu::Operations {
-                            load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
-                            store: wgpu::StoreOp::Store,
-                        },
-                    })],
-                    depth_stencil_attachment: None,
-                    timestamp_writes: None,
-                    occlusion_query_set: None,
-                });
+            let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: None,
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
             rpass.set_pipeline(&self.render_pipeline);
             rpass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
             rpass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
@@ -265,42 +262,49 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
     event_loop
         .run(move |event, target| {
             match event {
-                Event::WindowEvent { 
-                    window_id, 
-                    ref event 
-                } if window_id == state.window().id() => if !state.input(event) { 
-                    match event {
-                        WindowEvent::CloseRequested | WindowEvent::KeyboardInput {
-                            event: KeyEvent {
-                                state: ElementState::Pressed,
-                                physical_key: PhysicalKey::Code(KeyCode::Escape | KeyCode::KeyQ) ,
+                Event::WindowEvent {
+                    window_id,
+                    ref event,
+                } if window_id == state.window().id() => {
+                    if !state.input(event) {
+                        match event {
+                            WindowEvent::CloseRequested
+                            | WindowEvent::KeyboardInput {
+                                event:
+                                    KeyEvent {
+                                        state: ElementState::Pressed,
+                                        physical_key:
+                                            PhysicalKey::Code(KeyCode::Escape | KeyCode::KeyQ),
+                                        ..
+                                    },
                                 ..
-                            },
-                            ..
-                        } => target.exit(),
-                        WindowEvent::Resized(physical_size) => { 
-                            surface_ready = true;
-                            state.resize(*physical_size); 
-                        }
-                        WindowEvent::RedrawRequested => {
-                            state.window().request_redraw();
-
-                            if !surface_ready { return;}
-
-                            state.update();
-                            match state.render() {
-                                Ok(_) => {}
-                                // Reconfigure the surface if lost
-                                Err(wgpu::SurfaceError::Lost) => state.resize(state.size),
-                                // The system is out of memory, we should probably quit
-                                Err(wgpu::SurfaceError::OutOfMemory) => target.exit(),
-                                // All other errors (Outdated, Timeout) should be resolved by the next frame
-                                Err(e) => eprintln!("{:?}", e),
+                            } => target.exit(),
+                            WindowEvent::Resized(physical_size) => {
+                                surface_ready = true;
+                                state.resize(*physical_size);
                             }
+                            WindowEvent::RedrawRequested => {
+                                state.window().request_redraw();
+
+                                if !surface_ready {
+                                    return;
+                                }
+
+                                state.update();
+                                match state.render() {
+                                    Ok(_) => {}
+                                    // Reconfigure the surface if lost
+                                    Err(wgpu::SurfaceError::Lost) => state.resize(state.size),
+                                    // The system is out of memory, we should probably quit
+                                    Err(wgpu::SurfaceError::OutOfMemory) => target.exit(),
+                                    // All other errors (Outdated, Timeout) should be resolved by the next frame
+                                    Err(e) => eprintln!("{:?}", e),
+                                }
+                            }
+                            _ => {}
                         }
-                        _ => {}
                     }
-                },
+                }
                 _ => {}
             }
         })
