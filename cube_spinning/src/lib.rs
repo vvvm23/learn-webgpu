@@ -69,12 +69,12 @@ fn create_cube_vertices(vertices: &mut Vec<Vertex>, indices: &mut Vec<u16>, offs
         create_vertex([-1.0, -1.0, 0.0], RED, offset),
         create_vertex([1.0, -1.0, 0.0], RED, offset),
         create_vertex([-1.0, 1.0, 0.0], RED, offset),
-        create_vertex([1.0, 1.0, 0.0], BLUE, offset),
+        create_vertex([1.0, 1.0, 0.0], RED, offset),
 
-        create_vertex([-1.0, -1.0, 1.0], RED, offset),
-        create_vertex([1.0, -1.0, 1.0], RED, offset),
-        create_vertex([-1.0, 1.0, 1.0], RED, offset),
-        create_vertex([1.0, 1.0, 1.0], BLUE, offset),
+        create_vertex([-1.0, -1.0, 1.0], GREEN, offset),
+        create_vertex([1.0, -1.0, 1.0], GREEN, offset),
+        create_vertex([-1.0, 1.0, 1.0], GREEN, offset),
+        create_vertex([1.0, 1.0, 1.0], GREEN, offset),
     ]);
 
     indices.extend([
@@ -454,6 +454,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
 
 pub fn main() {
     let event_loop = EventLoop::new().unwrap();
+    // TODO: how to change the default size of the window?
     #[allow(unused_mut)]
     let mut builder = winit::window::WindowBuilder::new();
     #[cfg(target_arch = "wasm32")]
