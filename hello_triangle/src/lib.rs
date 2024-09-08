@@ -7,6 +7,7 @@ use winit::{
     keyboard::{KeyCode, PhysicalKey},
     window::Window,
 };
+use std::time::{Instant, Duration};
 
 const RED: [f32; 4] = [1.0, 0.0, 0.0, 1.0];
 const GREEN: [f32; 4] = [0.0, 1.0, 0.0, 1.0];
@@ -94,7 +95,7 @@ impl<'a> State<'a> {
         let surface = instance.create_surface(window).unwrap();
         let adapter = instance
             .request_adapter(&wgpu::RequestAdapterOptions {
-                power_preference: wgpu::PowerPreference::default(),
+                power_preference: wgpu::PowerPreference::HighPerformance,
                 force_fallback_adapter: false,
                 // Request an adapter which can render to our surface
                 compatible_surface: Some(&surface),
@@ -109,8 +110,7 @@ impl<'a> State<'a> {
                     label: None,
                     required_features: wgpu::Features::empty(),
                     // Make sure we use the texture resolution limits from the adapter, so we can support images the size of the swapchain.
-                    required_limits: wgpu::Limits::downlevel_webgl2_defaults()
-                        .using_resolution(adapter.limits()),
+                    required_limits: wgpu::Limits::default(),
                 },
                 None,
             )
@@ -222,9 +222,28 @@ impl<'a> State<'a> {
             multisample: wgpu::MultisampleState::default(),
             multiview: None,
         });
-        let mut config = surface
-            .get_default_config(&adapter, size.width, size.height)
-            .unwrap();
+        let surface_caps = surface.get_capabilities(&adapter);
+        // Shader code in this tutorial assumes an sRGB surface texture. Using a different
+        // one will result in all the colors coming out darker. If you want to support non
+        // sRGB surfaces, you'll need to account for that when drawing to the frame.
+        let surface_format = surface_caps.formats.iter()
+            .find(|f| f.is_srgb())
+            .copied()
+            .unwrap_or(surface_caps.formats[0]);
+
+        // let mut config = surface
+        //     .get_default_config(&adapter, size.width, size.height)
+        //     .unwrap();
+        let config = wgpu::SurfaceConfiguration {
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            format: surface_format,
+            width: size.width,
+            height: size.height,
+            present_mode: wgpu::PresentMode::Immediate,
+            alpha_mode: surface_caps.alpha_modes[0],
+            view_formats: vec![],
+            desired_maximum_frame_latency: 2
+        };
         surface.configure(&device, &config);
 
         let num_indices = index_data.len() as u32;
@@ -266,8 +285,9 @@ impl<'a> State<'a> {
         false
     }
 
-    fn update(&mut self) {
-        self.time += 0.01;
+    fn update(&mut self, delta_time: Duration) {
+        const SPEED: f32 = 1.0;
+        self.time += SPEED * (delta_time.as_micros() as f32) / 1_000_000.0;
         self.queue.write_buffer(&self.time_buffer, 0, bytemuck::cast_slice(&[TimeUniform { time: self.time }]));
     }
 
@@ -317,6 +337,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
 
     let mut state = State::new(&window).await;
     let mut surface_ready = false;
+    let mut last_render_time = Instant::now();
 
     event_loop
         .run(move |event, target| {
@@ -349,7 +370,11 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                                     return;
                                 }
 
-                                state.update();
+                                let now = Instant::now();
+                                let delta_time = now - last_render_time;
+                                state.update(delta_time);
+                                last_render_time = now;
+
                                 match state.render() {
                                     Ok(_) => {}
                                     // Reconfigure the surface if lost
@@ -365,7 +390,8 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                     }
                 }
                 _ => {}
-            }
+            };
+
         })
         .unwrap();
 }
