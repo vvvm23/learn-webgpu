@@ -57,7 +57,7 @@ fn create_cube_vertices(vertices: &mut Vec<Vertex>, indices: &mut Vec<u16>, offs
 
     /*
            4 ----7 
-         /     / |
+         / |   / |
         0 --- 3  |
         |  5--.--6
         | /   | /
@@ -66,29 +66,29 @@ fn create_cube_vertices(vertices: &mut Vec<Vertex>, indices: &mut Vec<u16>, offs
      */
 
     vertices.extend_from_slice(&[
-        create_vertex([-1.0, -1.0, 0.0], RED, offset),
-        create_vertex([1.0, -1.0, 0.0], RED, offset),
-        create_vertex([-1.0, 1.0, 0.0], RED, offset),
-        create_vertex([1.0, 1.0, 0.0], RED, offset),
+        create_vertex([-0.5, 0.5, 0.5], RED, offset),
+        create_vertex([-0.5, -0.5, 0.5], RED, offset),
+        create_vertex([0.5, -0.5, 0.5], RED, offset),
+        create_vertex([0.5, 0.5, 0.5], RED, offset),
 
-        create_vertex([-1.0, -1.0, 1.0], GREEN, offset),
-        create_vertex([1.0, -1.0, 1.0], GREEN, offset),
-        create_vertex([-1.0, 1.0, 1.0], GREEN, offset),
-        create_vertex([1.0, 1.0, 1.0], GREEN, offset),
+        create_vertex([-0.5, 0.5, 1.0], GREEN, offset),
+        create_vertex([-0.5, -0.5, 1.0], GREEN, offset),
+        create_vertex([0.5, -0.5, 1.0], GREEN, offset),
+        create_vertex([0.5, 0.5, 1.0], GREEN, offset),
     ]);
 
     indices.extend([
         // front face
         0, 1, 2, 
-        3, 2, 1,
+        2, 3, 0,
 
         // back face
-        4, 5, 6,
-        7, 6, 5,
+        4, 7, 6,
+        6, 5, 4,
 
         // left face
-        0, 5, 1,
-        4, 0, 5,
+        0, 4, 5,
+        5, 1, 0,
 
         // right face
         3, 2, 6,
@@ -96,7 +96,7 @@ fn create_cube_vertices(vertices: &mut Vec<Vertex>, indices: &mut Vec<u16>, offs
 
         // top face
         4, 0, 3,
-        7, 4, 3,
+        3, 7, 4,
 
         // bottom face
         5, 1, 2,
@@ -456,7 +456,7 @@ pub fn main() {
     let event_loop = EventLoop::new().unwrap();
     // TODO: how to change the default size of the window?
     #[allow(unused_mut)]
-    let mut builder = winit::window::WindowBuilder::new();
+    let mut builder = winit::window::WindowBuilder::new().with_inner_size(winit::dpi::LogicalSize::new(600, 600));
     #[cfg(target_arch = "wasm32")]
     {
         use wasm_bindgen::JsCast;
