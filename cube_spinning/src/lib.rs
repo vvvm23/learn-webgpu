@@ -119,15 +119,15 @@ fn create_cube_vertices(vertices: &mut Vec<Vertex>, indices: &mut Vec<u16>, offs
      */
 
     vertices.extend_from_slice(&[
-        create_vertex([-0.5, 0.5, 0.5], RED, offset),
-        create_vertex([-0.5, -0.5, 0.5], RED, offset),
-        create_vertex([0.5, -0.5, 0.5], RED, offset),
-        create_vertex([0.5, 0.5, 0.5], RED, offset),
+        create_vertex([-0.5, 0.5, -0.5], RED, offset),
+        create_vertex([-0.5, -0.5, -0.5], RED, offset),
+        create_vertex([0.5, -0.5, -0.5], RED, offset),
+        create_vertex([0.5, 0.5, -0.5], RED, offset),
 
-        create_vertex([-0.5, 0.5, 1.0], GREEN, offset),
-        create_vertex([-0.5, -0.5, 1.0], GREEN, offset),
-        create_vertex([0.5, -0.5, 1.0], GREEN, offset),
-        create_vertex([0.5, 0.5, 1.0], GREEN, offset),
+        create_vertex([-0.5, 0.5, 0.5], GREEN, offset),
+        create_vertex([-0.5, -0.5, 0.5], GREEN, offset),
+        create_vertex([0.5, -0.5, 0.5], GREEN, offset),
+        create_vertex([0.5, 0.5, 0.5], GREEN, offset),
     ]);
 
     indices.extend([
@@ -327,7 +327,7 @@ impl<'a> State<'a> {
         let camera = Camera {
             // position the camera 1 unit up and 2 units back
             // +z is out of the screen
-            eye: (0.0, 1.0, 2.0).into(),
+            eye: (0.0, 0.5, 2.0).into(),
             // have it look at the origin
             target: (0.0, 0.0, 0.0).into(),
             // which way is "up"
