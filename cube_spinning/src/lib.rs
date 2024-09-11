@@ -27,6 +27,59 @@ struct TimeUniform {
 }
 
 
+struct Camera {
+    eye: cgmath::Point3<f32>,
+    target: cgmath::Point3<f32>,
+    up: cgmath::Vector3<f32>,
+    aspect: f32,
+    fovy: f32,
+    znear: f32,
+    zfar: f32,
+}
+
+#[rustfmt::skip]
+pub const OPENGL_TO_WGPU_MATRIX: cgmath::Matrix4<f32> = cgmath::Matrix4::new(
+    1.0, 0.0, 0.0, 0.0,
+    0.0, 1.0, 0.0, 0.0,
+    0.0, 0.0, 0.5, 0.5,
+    0.0, 0.0, 0.0, 1.0,
+);
+
+impl Camera {
+    fn build_view_projection_matrix(&self) -> cgmath::Matrix4<f32> {
+        // 1.
+        let view = cgmath::Matrix4::look_at_rh(self.eye, self.target, self.up);
+        // 2.
+        let proj = cgmath::perspective(cgmath::Deg(self.fovy), self.aspect, self.znear, self.zfar);
+
+        // 3.
+        return OPENGL_TO_WGPU_MATRIX * proj * view;
+    }
+}
+
+
+#[repr(C)]
+#[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+struct CameraUniform {
+    // We can't use cgmath with bytemuck directly, so we'll have
+    // to convert the Matrix4 into a 4x4 f32 array
+    view_proj: [[f32; 4]; 4],
+}
+
+impl CameraUniform {
+    fn new() -> Self {
+        use cgmath::SquareMatrix;
+        Self {
+            view_proj: cgmath::Matrix4::identity().into(),
+        }
+    }
+
+    fn update_view_proj(&mut self, camera: &Camera) {
+        self.view_proj = camera.build_view_projection_matrix().into();
+    }
+}
+
+
 fn create_vertex(pos: [f32; 3], _color: [f32; 4], offset: f32) -> Vertex {
     let scale = 0.5;
     Vertex {
@@ -78,17 +131,21 @@ fn create_cube_vertices(vertices: &mut Vec<Vertex>, indices: &mut Vec<u16>, offs
     ]);
 
     indices.extend([
-        // front face
-        0, 1, 2, 
-        2, 3, 0,
-
         // back face
         4, 7, 6,
         6, 5, 4,
 
+        // bottom face
+        5, 1, 2,
+        2, 6, 5,
+
         // left face
         0, 4, 5,
         5, 1, 0,
+
+        // front face
+        0, 1, 2, 
+        2, 3, 0,
 
         // right face
         3, 2, 6,
@@ -97,11 +154,6 @@ fn create_cube_vertices(vertices: &mut Vec<Vertex>, indices: &mut Vec<u16>, offs
         // top face
         4, 0, 3,
         3, 7, 4,
-
-        // bottom face
-        5, 1, 2,
-        2, 6, 5
-
     ].iter().map(|i| base + *i));
 }
 
@@ -134,6 +186,11 @@ struct State<'a> {
     time: f32,
     time_buffer: wgpu::Buffer,
     time_bind_group: wgpu::BindGroup,
+
+    camera: Camera,
+    camera_uniform: CameraUniform,
+    camera_buffer: wgpu::Buffer,
+    camera_bind_group: wgpu::BindGroup,
 
     window: &'a Window,
 }
@@ -172,6 +229,30 @@ impl<'a> State<'a> {
             )
             .await
             .expect("Failed to create device");
+
+        let surface_caps = surface.get_capabilities(&adapter);
+        // Shader code in this tutorial assumes an sRGB surface texture. Using a different
+        // one will result in all the colors coming out darker. If you want to support non
+        // sRGB surfaces, you'll need to account for that when drawing to the frame.
+        let surface_format = surface_caps.formats.iter()
+            .find(|f| f.is_srgb())
+            .copied()
+            .unwrap_or(surface_caps.formats[0]);
+
+        // let mut config = surface
+        //     .get_default_config(&adapter, size.width, size.height)
+        //     .unwrap();
+        let config = wgpu::SurfaceConfiguration {
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            format: surface_format,
+            width: size.width,
+            height: size.height,
+            present_mode: wgpu::PresentMode::Immediate,
+            alpha_mode: surface_caps.alpha_modes[0],
+            view_formats: vec![],
+            desired_maximum_frame_latency: 2
+        };
+        surface.configure(&device, &config);
 
         let (vertex_data, index_data) = create_vertices();
         let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -243,6 +324,58 @@ impl<'a> State<'a> {
             }
         );
 
+        let camera = Camera {
+            // position the camera 1 unit up and 2 units back
+            // +z is out of the screen
+            eye: (0.0, 1.0, 2.0).into(),
+            // have it look at the origin
+            target: (0.0, 0.0, 0.0).into(),
+            // which way is "up"
+            up: cgmath::Vector3::unit_y(),
+            aspect: config.width as f32 / config.height as f32,
+            fovy: 45.0,
+            znear: 0.1,
+            zfar: 100.0,
+        };
+
+        let mut camera_uniform = CameraUniform::new();
+        camera_uniform.update_view_proj(&camera);
+
+        let camera_buffer = device.create_buffer_init(
+            &wgpu::util::BufferInitDescriptor {
+                label: Some("Camera Buffer"),
+                contents: bytemuck::cast_slice(&[camera_uniform]),
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            }
+        );
+
+        let camera_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                }
+            ],
+            label: Some("camera_bind_group_layout")
+        });
+
+        let camera_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            layout: &camera_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: camera_buffer.as_entire_binding()
+                }
+            ],
+            label: Some("camera_bind_group")
+        });
+
         // Load the shaders from disk
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: None,
@@ -250,8 +383,11 @@ impl<'a> State<'a> {
         });
 
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: None,
-            bind_group_layouts: &[&time_bind_group_layout],
+            label: Some("Render Pipeline"),
+            bind_group_layouts: &[
+                &time_bind_group_layout,
+                &camera_bind_group_layout
+            ],
             push_constant_ranges: &[],
         });
 
@@ -278,29 +414,6 @@ impl<'a> State<'a> {
             multisample: wgpu::MultisampleState::default(),
             multiview: None,
         });
-        let surface_caps = surface.get_capabilities(&adapter);
-        // Shader code in this tutorial assumes an sRGB surface texture. Using a different
-        // one will result in all the colors coming out darker. If you want to support non
-        // sRGB surfaces, you'll need to account for that when drawing to the frame.
-        let surface_format = surface_caps.formats.iter()
-            .find(|f| f.is_srgb())
-            .copied()
-            .unwrap_or(surface_caps.formats[0]);
-
-        // let mut config = surface
-        //     .get_default_config(&adapter, size.width, size.height)
-        //     .unwrap();
-        let config = wgpu::SurfaceConfiguration {
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-            format: surface_format,
-            width: size.width,
-            height: size.height,
-            present_mode: wgpu::PresentMode::Immediate,
-            alpha_mode: surface_caps.alpha_modes[0],
-            view_formats: vec![],
-            desired_maximum_frame_latency: 2
-        };
-        surface.configure(&device, &config);
 
         let num_indices = index_data.len() as u32;
 
@@ -319,6 +432,11 @@ impl<'a> State<'a> {
             time,
             time_buffer,
             time_bind_group,
+
+            camera,
+            camera_uniform,
+            camera_buffer,
+            camera_bind_group,
 
             window,
         }
@@ -375,6 +493,7 @@ impl<'a> State<'a> {
             });
             rpass.set_pipeline(&self.render_pipeline);
             rpass.set_bind_group(0, &self.time_bind_group, &[]);
+            rpass.set_bind_group(1, &self.camera_bind_group, &[]);
             rpass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
             rpass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
             rpass.draw_indexed(0..self.num_indices, 0, 0..3);
