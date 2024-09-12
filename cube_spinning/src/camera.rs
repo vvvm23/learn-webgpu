@@ -27,7 +27,6 @@ impl Camera {
     }
 }
 
-
 #[repr(C)]
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct CameraUniform {
@@ -48,22 +47,27 @@ impl CameraUniform {
     }
 }
 
-
-pub fn init_camera_utils(camera: &Camera, device: &wgpu::Device) -> (wgpu::Buffer, CameraUniform, wgpu::BindGroupLayout, wgpu::BindGroup) {
+pub fn init_camera_utils(
+    camera: &Camera,
+    device: &wgpu::Device,
+) -> (
+    wgpu::Buffer,
+    CameraUniform,
+    wgpu::BindGroupLayout,
+    wgpu::BindGroup,
+) {
     let mut camera_uniform = CameraUniform::new();
     camera_uniform.update_view_proj(&camera);
 
-    let camera_buffer = device.create_buffer_init(
-        &wgpu::util::BufferInitDescriptor {
-            label: Some("Camera Buffer"),
-            contents: bytemuck::cast_slice(&[camera_uniform]),
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        }
-    );
+    let camera_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("Camera Buffer"),
+        contents: bytemuck::cast_slice(&[camera_uniform]),
+        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+    });
 
-    let camera_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-        entries: &[
-            wgpu::BindGroupLayoutEntry {
+    let camera_bind_group_layout =
+        device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            entries: &[wgpu::BindGroupLayoutEntry {
                 binding: 0,
                 visibility: wgpu::ShaderStages::VERTEX,
                 ty: wgpu::BindingType::Buffer {
@@ -72,21 +76,22 @@ pub fn init_camera_utils(camera: &Camera, device: &wgpu::Device) -> (wgpu::Buffe
                     min_binding_size: None,
                 },
                 count: None,
-            }
-        ],
-        label: Some("camera_bind_group_layout")
-    });
+            }],
+            label: Some("camera_bind_group_layout"),
+        });
 
     let camera_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
         layout: &camera_bind_group_layout,
-        entries: &[
-            wgpu::BindGroupEntry {
-                binding: 0,
-                resource: camera_buffer.as_entire_binding()
-            }
-        ],
-        label: Some("camera_bind_group")
+        entries: &[wgpu::BindGroupEntry {
+            binding: 0,
+            resource: camera_buffer.as_entire_binding(),
+        }],
+        label: Some("camera_bind_group"),
     });
-    (camera_buffer, camera_uniform, camera_bind_group_layout, camera_bind_group)
-
+    (
+        camera_buffer,
+        camera_uniform,
+        camera_bind_group_layout,
+        camera_bind_group,
+    )
 }

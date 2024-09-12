@@ -1,8 +1,8 @@
 use bytemuck::{Pod, Zeroable};
 use std::mem;
 
-use wgpu::util::DeviceExt;
 use crate::constants;
+use wgpu::util::DeviceExt;
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
@@ -107,7 +107,12 @@ pub fn create_buffers(device: &wgpu::Device) -> (wgpu::Buffer, wgpu::Buffer, u32
     let vertex_size = mem::size_of::<Vertex>();
     let num_indices = index_data.len();
 
-    (vertex_buffer, index_buffer, vertex_size as u32, num_indices as u32)
+    (
+        vertex_buffer,
+        index_buffer,
+        vertex_size as u32,
+        num_indices as u32,
+    )
 }
 
 pub fn create_vertex_buffer_desc(vertex_size: u32) -> wgpu::VertexBufferLayout<'static> {
@@ -125,6 +130,6 @@ pub fn create_vertex_buffer_desc(vertex_size: u32) -> wgpu::VertexBufferLayout<'
                 offset: 4 * 4,
                 shader_location: 1,
             },
-        ]
+        ],
     }
 }

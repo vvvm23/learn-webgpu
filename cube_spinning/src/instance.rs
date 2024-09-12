@@ -1,5 +1,5 @@
-use wgpu::util::DeviceExt;
 use cgmath::prelude::*;
+use wgpu::util::DeviceExt;
 
 pub struct Instance {
     pub position: cgmath::Vector3<f32>,
@@ -13,8 +13,10 @@ pub struct InstanceRaw {
 
 impl Instance {
     pub fn to_raw(&self) -> InstanceRaw {
-        InstanceRaw { 
-            model: (cgmath::Matrix4::from_translation(self.position) * cgmath::Matrix4::from(self.rotation)).into()
+        InstanceRaw {
+            model: (cgmath::Matrix4::from_translation(self.position)
+                * cgmath::Matrix4::from(self.rotation))
+            .into(),
         }
     }
 }
@@ -58,29 +60,37 @@ impl InstanceRaw {
     }
 }
 
-
 pub fn create_instances(device: &wgpu::Device) -> (Vec<Instance>, wgpu::Buffer) {
     const NUM_INSTANCES_PER_ROW: u32 = 10;
-    const INSTANCE_DISPLACEMENT: cgmath::Vector3<f32> = cgmath::Vector3::new(NUM_INSTANCES_PER_ROW as f32 * 0.5, NUM_INSTANCES_PER_ROW as f32 * 0.5, 0.0);
-    let instances = (0..NUM_INSTANCES_PER_ROW).flat_map(|y| {
-        (0..NUM_INSTANCES_PER_ROW).map(move |x| {
-            let position = cgmath::Vector3 { x: x as f32, y: y as f32, z: 0.0} - INSTANCE_DISPLACEMENT;
+    const INSTANCE_DISPLACEMENT: cgmath::Vector3<f32> = cgmath::Vector3::new(
+        NUM_INSTANCES_PER_ROW as f32 * 0.5,
+        NUM_INSTANCES_PER_ROW as f32 * 0.5,
+        0.0,
+    );
+    let instances = (0..NUM_INSTANCES_PER_ROW)
+        .flat_map(|y| {
+            (0..NUM_INSTANCES_PER_ROW).map(move |x| {
+                let position = cgmath::Vector3 {
+                    x: x as f32,
+                    y: y as f32,
+                    z: 0.0,
+                } - INSTANCE_DISPLACEMENT;
 
-            let rotation = cgmath::Quaternion::from_axis_angle(cgmath::Vector3::unit_z(), cgmath::Deg(0.0));
+                let rotation = cgmath::Quaternion::from_axis_angle(
+                    cgmath::Vector3::unit_z(),
+                    cgmath::Deg(0.0),
+                );
 
-            Instance {
-                position, rotation,
-            }
+                Instance { position, rotation }
+            })
         })
-    }).collect::<Vec<_>>();
+        .collect::<Vec<_>>();
 
     let instance_data = instances.iter().map(Instance::to_raw).collect::<Vec<_>>();
-    let instance_buffer = device.create_buffer_init(
-        &wgpu::util::BufferInitDescriptor {
-            label: Some("Instance Buffer"),
-            contents: bytemuck::cast_slice(&instance_data),
-            usage: wgpu::BufferUsages::VERTEX,
-        }
-    );
+    let instance_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("Instance Buffer"),
+        contents: bytemuck::cast_slice(&instance_data),
+        usage: wgpu::BufferUsages::VERTEX,
+    });
     (instances, instance_buffer)
 }
