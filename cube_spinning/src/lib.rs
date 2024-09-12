@@ -8,281 +8,15 @@ use winit::{
     window::Window,
 };
 use std::time::{Instant, Duration};
-use cgmath::{prelude::*, Quaternion};
+use cgmath::prelude::*;
 
-const RED: [f32; 4] = [1.0, 0.0, 0.0, 1.0];
-const GREEN: [f32; 4] = [0.0, 1.0, 0.0, 1.0];
-const BLUE: [f32; 4] = [0.0, 0.0, 1.0, 1.0];
+mod camera;
+mod constants;
+mod texture;
+mod instance;
+mod time;
+mod cube;
 
-#[repr(C)]
-#[derive(Clone, Copy, Pod, Zeroable)]
-struct Vertex {
-    _pos: [f32; 4],
-    _color: [f32; 4],
-}
-
-#[repr(C)]
-#[derive(Clone, Copy, Pod, Zeroable)]
-struct TimeUniform {
-    time: f32
-}
-
-
-struct Camera {
-    eye: cgmath::Point3<f32>,
-    target: cgmath::Point3<f32>,
-    up: cgmath::Vector3<f32>,
-    aspect: f32,
-    fovy: f32,
-    znear: f32,
-    zfar: f32,
-}
-
-#[rustfmt::skip]
-pub const OPENGL_TO_WGPU_MATRIX: cgmath::Matrix4<f32> = cgmath::Matrix4::new(
-    1.0, 0.0, 0.0, 0.0,
-    0.0, 1.0, 0.0, 0.0,
-    0.0, 0.0, 0.5, 0.5,
-    0.0, 0.0, 0.0, 1.0,
-);
-
-impl Camera {
-    fn build_view_projection_matrix(&self) -> cgmath::Matrix4<f32> {
-        // 1.
-        let view = cgmath::Matrix4::look_at_rh(self.eye, self.target, self.up);
-        // 2.
-        let proj = cgmath::perspective(cgmath::Deg(self.fovy), self.aspect, self.znear, self.zfar);
-
-        // 3.
-        return OPENGL_TO_WGPU_MATRIX * proj * view;
-    }
-}
-
-
-#[repr(C)]
-#[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
-struct CameraUniform {
-    // We can't use cgmath with bytemuck directly, so we'll have
-    // to convert the Matrix4 into a 4x4 f32 array
-    view_proj: [[f32; 4]; 4],
-}
-
-impl CameraUniform {
-    fn new() -> Self {
-        use cgmath::SquareMatrix;
-        Self {
-            view_proj: cgmath::Matrix4::identity().into(),
-        }
-    }
-
-    fn update_view_proj(&mut self, camera: &Camera) {
-        self.view_proj = camera.build_view_projection_matrix().into();
-    }
-}
-
-struct Texture {
-    texture: wgpu::Texture,
-    view: wgpu::TextureView,
-    sampler: wgpu::Sampler,
-}
-
-impl Texture {
-    const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
-
-    fn create_depth_texture(device: &wgpu::Device, config: &wgpu::SurfaceConfiguration, label: &str) -> Self {
-        let size = wgpu::Extent3d {
-            width: config.width,
-            height: config.height,
-            depth_or_array_layers: 1,
-        };
-
-        let desc = wgpu::TextureDescriptor {
-            label: Some(label),
-            size,
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: Self::DEPTH_FORMAT,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
-            view_formats: &[]
-        };
-        let texture = device.create_texture(&desc);
-
-        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-        let sampler = device.create_sampler(
-            &wgpu::SamplerDescriptor {
-                address_mode_u: wgpu::AddressMode::ClampToEdge,
-                address_mode_v: wgpu::AddressMode::ClampToEdge,
-                address_mode_w: wgpu::AddressMode::ClampToEdge,
-                mag_filter: wgpu::FilterMode::Linear,
-                min_filter: wgpu::FilterMode::Linear,
-                mipmap_filter: wgpu::FilterMode::Nearest,
-                compare: Some(wgpu::CompareFunction::LessEqual), // 5.
-                lod_min_clamp: 0.0,
-                lod_max_clamp: 100.0,
-                ..Default::default()
-            }
-        );
-
-        Self {texture, view, sampler}
-    }
-}
-
-struct Instance {
-    position: cgmath::Vector3<f32>,
-    rotation: cgmath::Quaternion<f32>,
-}
-#[repr(C)]
-#[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
-struct InstanceRaw {
-    model: [[f32; 4]; 4],
-}
-
-impl Instance {
-    fn to_raw(&self) -> InstanceRaw {
-        InstanceRaw { 
-            model: (cgmath::Matrix4::from_translation(self.position) * cgmath::Matrix4::from(self.rotation)).into()
-        }
-    }
-}
-
-impl InstanceRaw {
-    fn desc() -> wgpu::VertexBufferLayout<'static> {
-        wgpu::VertexBufferLayout {
-            array_stride: mem::size_of::<InstanceRaw>() as wgpu::BufferAddress,
-            // We need to switch from using a step mode of Vertex to Instance
-            // This means that our shaders will only change to use the next
-            // instance when the shader starts processing a new instance
-            step_mode: wgpu::VertexStepMode::Instance,
-            attributes: &[
-                // A mat4 takes up 4 vertex slots as it is technically 4 vec4s. We need to define a slot
-                // for each vec4. We'll have to reassemble the mat4 in the shader.
-                wgpu::VertexAttribute {
-                    offset: 0,
-                    // While our vertex shader only uses locations 0, and 1 now, in later tutorials, we'll
-                    // be using 2, 3, and 4, for Vertex. We'll start at slot 5, not conflict with them later
-                    shader_location: 5,
-                    format: wgpu::VertexFormat::Float32x4,
-                },
-                wgpu::VertexAttribute {
-                    offset: mem::size_of::<[f32; 4]>() as wgpu::BufferAddress,
-                    shader_location: 6,
-                    format: wgpu::VertexFormat::Float32x4,
-                },
-                wgpu::VertexAttribute {
-                    offset: mem::size_of::<[f32; 8]>() as wgpu::BufferAddress,
-                    shader_location: 7,
-                    format: wgpu::VertexFormat::Float32x4,
-                },
-                wgpu::VertexAttribute {
-                    offset: mem::size_of::<[f32; 12]>() as wgpu::BufferAddress,
-                    shader_location: 8,
-                    format: wgpu::VertexFormat::Float32x4,
-                },
-            ],
-        }
-    }
-}
-
-fn create_vertex(pos: [f32; 3], _color: [f32; 4], offset: f32) -> Vertex {
-    let scale = 0.5;
-    Vertex {
-        _pos: [
-            (pos[0] + offset) * scale,
-            (pos[1] + offset) * scale,
-            (pos[2] + offset) * scale,
-            1.0,
-        ],
-        _color,
-    }
-}
-
-// fn create_triangle_vertices(vertices: &mut Vec<Vertex>, indices: &mut Vec<u16>, offset: f32) {
-//     let base = vertices.len() as u16;
-
-//     vertices.extend_from_slice(&[
-//         create_vertex([1, -1], BLUE, offset),
-//         create_vertex([0, 1], GREEN, offset),
-//         create_vertex([-1, -1], RED, offset),
-//     ]);
-
-//     indices.extend([0, 1, 2].iter().map(|i| base + *i));
-// }
-
-fn create_cube_vertices(vertices: &mut Vec<Vertex>, indices: &mut Vec<u16>, offset: f32) {
-    let base = vertices.len() as u16;
-
-    /*
-           4 ----7 
-         / |   / |
-        0 --- 3  |
-        |  5--.--6
-        | /   | /
-        1 --- 2
-
-     */
-
-    vertices.extend_from_slice(&[
-        create_vertex([-0.5, 0.5, -0.5], RED, offset),
-        create_vertex([-0.5, -0.5, -0.5], RED, offset),
-        create_vertex([0.5, -0.5, -0.5], RED, offset),
-        create_vertex([0.5, 0.5, -0.5], RED, offset),
-
-        create_vertex([-0.5, 0.5, 0.5], GREEN, offset),
-        create_vertex([-0.5, -0.5, 0.5], GREEN, offset),
-        create_vertex([0.5, -0.5, 0.5], GREEN, offset),
-        create_vertex([0.5, 0.5, 0.5], GREEN, offset),
-        // create_vertex([0.0, 1.0, 0.0], RED, offset),
-        // create_vertex([0.0, 0.0, 0.0], RED, offset),
-        // create_vertex([1.0, 0.0, 0.0], RED, offset),
-        // create_vertex([1.0, 1.0, 0.0], RED, offset),
-
-        // create_vertex([0.0, 1.0, 1.0], GREEN, offset),
-        // create_vertex([0.0, 0.0, 1.0], GREEN, offset),
-        // create_vertex([1.0, 0.0, 1.0], GREEN, offset),
-        // create_vertex([1.0, 1.0, 1.0], GREEN, offset),
-    ]);
-
-    indices.extend([
-        // back face
-        4, 7, 6,
-        6, 5, 4,
-
-        // bottom face
-        5, 1, 2,
-        2, 6, 5,
-
-        // left face
-        0, 4, 5,
-        5, 1, 0,
-
-        // front face
-        0, 1, 2, 
-        2, 3, 0,
-
-        // right face
-        3, 2, 6,
-        6, 7, 3,
-
-        // top face
-        4, 0, 3,
-        3, 7, 4,
-    ].iter().map(|i| base + *i));
-}
-
-fn create_vertices() -> (Vec<Vertex>, Vec<u16>) {
-    let mut vertices = Vec::new();
-    let mut indices = Vec::new();
-
-    create_cube_vertices(&mut vertices, &mut indices, 0.0);
-    // create_triangle_vertices(&mut vertices, &mut indices, 0.0);
-    // create_triangle_vertices(&mut vertices, &mut indices, -1.0);
-    // create_triangle_vertices(&mut vertices, &mut indices, 1.0);
-
-    println!("{:?} vertices, {:?} indices", vertices.len(), indices.len());
-
-    (vertices, indices)
-}
 
 struct State<'a> {
     surface: wgpu::Surface<'a>,
@@ -300,23 +34,21 @@ struct State<'a> {
     time_buffer: wgpu::Buffer,
     time_bind_group: wgpu::BindGroup,
 
-    instances: Vec<Instance>,
+    instances: Vec<instance::Instance>,
     instance_buffer: wgpu::Buffer,
 
-    camera: Camera,
-    camera_uniform: CameraUniform,
+    camera: camera::Camera,
+    camera_uniform: camera::CameraUniform,
     camera_buffer: wgpu::Buffer,
     camera_bind_group: wgpu::BindGroup,
 
-    depth_texture: Texture,
+    depth_texture: texture::Texture,
 
     window: &'a Window,
 }
 
 impl<'a> State<'a> {
     async fn new(window: &'a Window) -> State<'a> {
-        // TODO: add code to create state here, just look at current code and
-        // port into here to populate fields of State.
         let mut size = window.inner_size();
         size.width = size.width.max(1);
         size.height = size.height.max(1);
@@ -357,9 +89,6 @@ impl<'a> State<'a> {
             .copied()
             .unwrap_or(surface_caps.formats[0]);
 
-        // let mut config = surface
-        //     .get_default_config(&adapter, size.width, size.height)
-        //     .unwrap();
         let config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
             format: surface_format,
@@ -372,61 +101,11 @@ impl<'a> State<'a> {
         };
         surface.configure(&device, &config);
 
-        let (vertex_data, index_data) = create_vertices();
-        let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Vertex Buffer"),
-            contents: bytemuck::cast_slice(&vertex_data),
-            usage: wgpu::BufferUsages::VERTEX,
-        });
+        let (vertex_buffer, index_buffer, vertex_size, num_indices) = cube::create_buffers(&device);
 
-        let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Index Buffer"),
-            contents: bytemuck::cast_slice(&index_data),
-            usage: wgpu::BufferUsages::INDEX,
-        });
+        let (time_buffer, time_bind_group_layout, time_bind_group) = time::init_time_utils(1.0, &device);
 
-        let vertex_size = mem::size_of::<Vertex>();
-
-        let time = 1.0;
-        let time_uniform = TimeUniform { time: time };
-        let time_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Time Buffer"),
-            contents: bytemuck::cast_slice(&[time_uniform]),
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST
-        });
-
-        let time_bind_group_layout = device.create_bind_group_layout(
-            &wgpu::BindGroupLayoutDescriptor {
-                entries: &[
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 0,
-                        visibility: wgpu::ShaderStages::VERTEX,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Uniform,
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
-                        },
-                        count: None,
-                    }
-                ],
-                label: Some("time_bind_group_layout")
-            }
-        );
-
-        let time_bind_group = device.create_bind_group(
-            &wgpu::BindGroupDescriptor {
-                layout: &time_bind_group_layout,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: time_buffer.as_entire_binding()
-                    }
-                ],
-                label: Some("time_bind_group")
-            }
-        );
-
-        let camera = Camera {
+        let camera = camera::Camera {
             // position the camera 1 unit up and 2 units back
             // +z is out of the screen
             eye: (0.0, 0.0, 7.0).into(),
@@ -439,93 +118,11 @@ impl<'a> State<'a> {
             znear: 0.1,
             zfar: 100.0,
         };
+        let (camera_buffer, camera_uniform, camera_bind_group_layout, camera_bind_group) = camera::init_camera_utils(&camera, &device);
+        let (instances, instance_buffer) = instance::create_instances(&device);
 
-        let mut camera_uniform = CameraUniform::new();
-        camera_uniform.update_view_proj(&camera);
-
-        let camera_buffer = device.create_buffer_init(
-            &wgpu::util::BufferInitDescriptor {
-                label: Some("Camera Buffer"),
-                contents: bytemuck::cast_slice(&[camera_uniform]),
-                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            }
-        );
-
-        let camera_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            entries: &[
-                wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::VERTEX,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                }
-            ],
-            label: Some("camera_bind_group_layout")
-        });
-
-        let camera_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            layout: &camera_bind_group_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: camera_buffer.as_entire_binding()
-                }
-            ],
-            label: Some("camera_bind_group")
-        });
-
-        const NUM_INSTANCES_PER_ROW: u32 = 10;
-        const INSTANCE_DISPLACEMENT: cgmath::Vector3<f32> = cgmath::Vector3::new(NUM_INSTANCES_PER_ROW as f32 * 0.5, NUM_INSTANCES_PER_ROW as f32 * 0.5, 0.0);
-        let instances = (0..NUM_INSTANCES_PER_ROW).flat_map(|y| {
-            (0..NUM_INSTANCES_PER_ROW).map(move |x| {
-                let position = cgmath::Vector3 { x: x as f32, y: y as f32, z: 0.0} - INSTANCE_DISPLACEMENT;
-
-                let rotation = cgmath::Quaternion::from_axis_angle(cgmath::Vector3::unit_z(), cgmath::Deg(0.0));
-                // let rotation = if position.is_zero() {
-                //     // this is needed so an object at (0, 0, 0) won't get scaled to zero
-                //     // as Quaternions can affect scale if they're not created correctly
-                //     cgmath::Quaternion::from_axis_angle(cgmath::Vector3::unit_z(), cgmath::Deg(0.0))
-                // } else {
-                //     cgmath::Quaternion::from_axis_angle(position.normalize(), cgmath::Deg(45.0))
-                // };
-
-                Instance {
-                    position, rotation,
-                }
-            })
-        }).collect::<Vec<_>>();
-
-        let instance_data = instances.iter().map(Instance::to_raw).collect::<Vec<_>>();
-        let instance_buffer = device.create_buffer_init(
-            &wgpu::util::BufferInitDescriptor {
-                label: Some("Instance Buffer"),
-                contents: bytemuck::cast_slice(&instance_data),
-                usage: wgpu::BufferUsages::VERTEX,
-            }
-        );
-
-        let vertex_buffers = [wgpu::VertexBufferLayout {
-            array_stride: vertex_size as wgpu::BufferAddress,
-            step_mode: wgpu::VertexStepMode::Vertex,
-            attributes: &[
-                wgpu::VertexAttribute {
-                    format: wgpu::VertexFormat::Float32x4,
-                    offset: 0,
-                    shader_location: 0,
-                },
-                wgpu::VertexAttribute {
-                    format: wgpu::VertexFormat::Float32x4,
-                    offset: 4 * 4,
-                    shader_location: 1,
-                },
-            ],
-        }, InstanceRaw::desc()];
-
-        let depth_texture = Texture::create_depth_texture(&device, &config, "depth_texture");
+        let vertex_buffers = [cube::create_vertex_buffer_desc(vertex_size), instance::InstanceRaw::desc()];
+        let depth_texture = texture::Texture::create_depth_texture(&device, &config, "depth_texture");
 
         // Load the shaders from disk
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -562,7 +159,7 @@ impl<'a> State<'a> {
             }),
             primitive: wgpu::PrimitiveState::default(),
             depth_stencil: Some(wgpu::DepthStencilState {
-                format: Texture::DEPTH_FORMAT,
+                format: texture::Texture::DEPTH_FORMAT,
                 depth_write_enabled: true,
                 depth_compare: wgpu::CompareFunction::Less,
                 stencil: wgpu::StencilState::default(),
@@ -571,8 +168,6 @@ impl<'a> State<'a> {
             multisample: wgpu::MultisampleState::default(),
             multiview: None,
         });
-
-        let num_indices = index_data.len() as u32;
 
         Self {
             surface,
@@ -586,7 +181,7 @@ impl<'a> State<'a> {
             index_buffer,
             num_indices,
 
-            time,
+            time: 1.0,
             time_buffer,
             time_bind_group,
 
@@ -614,7 +209,7 @@ impl<'a> State<'a> {
             self.config.width = new_size.width;
             self.config.height = new_size.height;
             self.surface.configure(&self.device, &self.config);
-            self.depth_texture = Texture::create_depth_texture(&self.device, &self.config, "depth_texture");
+            self.depth_texture = texture::Texture::create_depth_texture(&self.device, &self.config, "depth_texture");
         }
     }
 
@@ -625,7 +220,7 @@ impl<'a> State<'a> {
     fn update(&mut self, delta_time: Duration) {
         const SPEED: f32 = 1.0;
         self.time += SPEED * (delta_time.as_micros() as f32) / 1_000_000.0;
-        self.queue.write_buffer(&self.time_buffer, 0, bytemuck::cast_slice(&[TimeUniform { time: self.time }]));
+        self.queue.write_buffer(&self.time_buffer, 0, bytemuck::cast_slice(&[time::TimeUniform { time: self.time }]));
     }
 
     fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
@@ -746,7 +341,6 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
 
 pub fn main() {
     let event_loop = EventLoop::new().unwrap();
-    // TODO: how to change the default size of the window?
     #[allow(unused_mut)]
     let mut builder = winit::window::WindowBuilder::new().with_inner_size(winit::dpi::LogicalSize::new(600, 600));
     #[cfg(target_arch = "wasm32")]
