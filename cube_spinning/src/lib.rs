@@ -1,6 +1,4 @@
-use bytemuck::{Pod, Zeroable};
-use std::{borrow::Cow, mem};
-use wgpu::util::DeviceExt;
+use std::borrow::Cow;
 use winit::{
     event::{ElementState, Event, KeyEvent, WindowEvent},
     event_loop::EventLoop,
@@ -8,7 +6,6 @@ use winit::{
     window::Window,
 };
 use std::time::{Instant, Duration};
-use cgmath::prelude::*;
 
 mod camera;
 mod constants;
@@ -37,8 +34,11 @@ struct State<'a> {
     instances: Vec<instance::Instance>,
     instance_buffer: wgpu::Buffer,
 
+    #[allow(unused)]
     camera: camera::Camera,
+    #[allow(unused)]
     camera_uniform: camera::CameraUniform,
+    #[allow(unused)]
     camera_buffer: wgpu::Buffer,
     camera_bind_group: wgpu::BindGroup,
 

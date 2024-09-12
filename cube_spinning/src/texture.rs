@@ -1,6 +1,8 @@
 pub struct Texture {
+    #[allow(unused)]
     texture: wgpu::Texture,
     pub view: wgpu::TextureView,
+    #[allow(unused)]
     sampler: wgpu::Sampler,
 }
 
