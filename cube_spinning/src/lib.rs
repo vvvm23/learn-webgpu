@@ -8,7 +8,7 @@ use winit::{
     window::Window,
 };
 use std::time::{Instant, Duration};
-use cgmath::prelude::*;
+use cgmath::{prelude::*, Quaternion};
 
 const RED: [f32; 4] = [1.0, 0.0, 0.0, 1.0];
 const GREEN: [f32; 4] = [0.0, 1.0, 0.0, 1.0];
@@ -232,6 +232,15 @@ fn create_cube_vertices(vertices: &mut Vec<Vertex>, indices: &mut Vec<u16>, offs
         create_vertex([-0.5, -0.5, 0.5], GREEN, offset),
         create_vertex([0.5, -0.5, 0.5], GREEN, offset),
         create_vertex([0.5, 0.5, 0.5], GREEN, offset),
+        // create_vertex([0.0, 1.0, 0.0], RED, offset),
+        // create_vertex([0.0, 0.0, 0.0], RED, offset),
+        // create_vertex([1.0, 0.0, 0.0], RED, offset),
+        // create_vertex([1.0, 1.0, 0.0], RED, offset),
+
+        // create_vertex([0.0, 1.0, 1.0], GREEN, offset),
+        // create_vertex([0.0, 0.0, 1.0], GREEN, offset),
+        // create_vertex([1.0, 0.0, 1.0], GREEN, offset),
+        // create_vertex([1.0, 1.0, 1.0], GREEN, offset),
     ]);
 
     indices.extend([
@@ -420,13 +429,13 @@ impl<'a> State<'a> {
         let camera = Camera {
             // position the camera 1 unit up and 2 units back
             // +z is out of the screen
-            eye: (0.0, 0.0, 10.0).into(),
+            eye: (0.0, 0.0, 7.0).into(),
             // have it look at the origin
             target: (0.0, 0.0, 0.0).into(),
             // which way is "up"
             up: cgmath::Vector3::unit_y(),
             aspect: config.width as f32 / config.height as f32,
-            fovy: 45.0,
+            fovy: 60.0,
             znear: 0.1,
             zfar: 100.0,
         };
@@ -475,13 +484,14 @@ impl<'a> State<'a> {
             (0..NUM_INSTANCES_PER_ROW).map(move |x| {
                 let position = cgmath::Vector3 { x: x as f32, y: y as f32, z: 0.0} - INSTANCE_DISPLACEMENT;
 
-                let rotation = if position.is_zero() {
-                    // this is needed so an object at (0, 0, 0) won't get scaled to zero
-                    // as Quaternions can affect scale if they're not created correctly
-                    cgmath::Quaternion::from_axis_angle(cgmath::Vector3::unit_z(), cgmath::Deg(0.0))
-                } else {
-                    cgmath::Quaternion::from_axis_angle(position.normalize(), cgmath::Deg(45.0))
-                };
+                let rotation = cgmath::Quaternion::from_axis_angle(cgmath::Vector3::unit_z(), cgmath::Deg(0.0));
+                // let rotation = if position.is_zero() {
+                //     // this is needed so an object at (0, 0, 0) won't get scaled to zero
+                //     // as Quaternions can affect scale if they're not created correctly
+                //     cgmath::Quaternion::from_axis_angle(cgmath::Vector3::unit_z(), cgmath::Deg(0.0))
+                // } else {
+                //     cgmath::Quaternion::from_axis_angle(position.normalize(), cgmath::Deg(45.0))
+                // };
 
                 Instance {
                     position, rotation,

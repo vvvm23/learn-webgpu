@@ -46,7 +46,8 @@ fn vs_main(
     var result: VertexOutput;
 
     result.position = camera.view_proj * model_matrix * rotation_mat * position;
-    result.color = color;
+
+    result.color = (position + 0.5) / 2.0;
 
     return result;
 }
