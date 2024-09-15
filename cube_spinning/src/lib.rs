@@ -105,18 +105,20 @@ impl<'a> State<'a> {
 
         let (time_buffer, time_bind_group_layout, time_bind_group) = time::init_time_utils(1.0, &device);
 
+        let aspect = config.width as f32 / config.height as f32;
+        println!("aspect ratio {}", aspect);
         let camera = camera::Camera {
             // position the camera 1 unit up and 2 units back
             // +z is out of the screen
-            eye: (0.0, 0.0, 7.0).into(),
+            eye: (0.0, 10.0, 0.1).into(),
             // have it look at the origin
             target: (0.0, 0.0, 0.0).into(),
             // which way is "up"
             up: cgmath::Vector3::unit_y(),
             aspect: config.width as f32 / config.height as f32,
-            fovy: 60.0,
+            fovy: 90.0,
             znear: 0.1,
-            zfar: 100.0,
+            zfar: 5.0,
         };
         let (camera_buffer, camera_uniform, camera_bind_group_layout, camera_bind_group) = camera::init_camera_utils(&camera, &device);
         let (instances, instance_buffer) = instance::create_instances(&device);
@@ -342,7 +344,9 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
 pub fn main() {
     let event_loop = EventLoop::new().unwrap();
     #[allow(unused_mut)]
-    let mut builder = winit::window::WindowBuilder::new().with_inner_size(winit::dpi::LogicalSize::new(600, 600));
+    // let mut builder = winit::window::WindowBuilder::new().with_inner_size(winit::dpi::LogicalSize::new(600, 600));
+    let mut builder = winit::window::WindowBuilder::new()
+        .with_fullscreen(Some(winit::window::Fullscreen::Borderless(None)));
     #[cfg(target_arch = "wasm32")]
     {
         use wasm_bindgen::JsCast;
