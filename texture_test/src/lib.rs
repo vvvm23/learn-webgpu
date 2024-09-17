@@ -27,11 +27,11 @@ struct TimeUniform {
     time: f32,
 }
 
-fn create_vertex(pos: [f32; 2], tex: [f32; 2]) -> Vertex {
+fn create_vertex(pos: [f32; 2], tex: [f32; 2], scale: f32) -> Vertex {
     Vertex {
         pos: [
-            pos[0],
-            pos[1],
+            pos[0] * scale,
+            pos[1] * scale,
             0.0,
             1.0,
         ],
@@ -41,10 +41,10 @@ fn create_vertex(pos: [f32; 2], tex: [f32; 2]) -> Vertex {
 
 fn create_vertices() -> (Vec<Vertex>, Vec<u16>) {
     let vertices = vec![
-        create_vertex([-1.0, -1.0], [0.0,0.0]),
-        create_vertex([1.0, -1.0], [1.0, 0.0]),
-        create_vertex([-1.0, 1.0], [0.0, 1.0]),
-        create_vertex([1.0, 1.0], [1.0, 1.0]),
+        create_vertex([-1.0, -1.0], [0.0,0.0], 2.0),
+        create_vertex([1.0, -1.0], [1.0, 0.0], 2.0),
+        create_vertex([-1.0, 1.0], [0.0, 1.0], 2.0),
+        create_vertex([1.0, 1.0], [1.0, 1.0], 2.0),
     ];
 
     let indices = vec![0, 1, 2, 3, 2, 1];
@@ -65,6 +65,10 @@ struct State<'a> {
     num_indices: u32,
 
     texture_bind_group: wgpu::BindGroup,
+
+    time: f32,
+    time_buffer: wgpu::Buffer,
+    time_bind_group: wgpu::BindGroup,
 
     window: &'a Window,
 }
@@ -167,9 +171,9 @@ impl<'a> State<'a> {
         
         let image_texture_view = image_texture.create_view(&wgpu::TextureViewDescriptor::default());
         let image_texture_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-            address_mode_u: wgpu::AddressMode::ClampToEdge,
-            address_mode_v: wgpu::AddressMode::ClampToEdge,
-            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            address_mode_u: wgpu::AddressMode::MirrorRepeat,
+            address_mode_v: wgpu::AddressMode::MirrorRepeat,
+            address_mode_w: wgpu::AddressMode::MirrorRepeat,
             mag_filter: wgpu::FilterMode::Linear,
             min_filter: wgpu::FilterMode::Nearest,
             mipmap_filter: wgpu::FilterMode::Nearest,
@@ -180,7 +184,7 @@ impl<'a> State<'a> {
             entries: &[
                 wgpu::BindGroupLayoutEntry {
                     binding: 0,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
                     ty: wgpu::BindingType::Texture {
                         multisampled: false,
                         view_dimension: wgpu::TextureViewDimension::D2,
@@ -217,6 +221,35 @@ impl<'a> State<'a> {
             }
         );
 
+        let time_uniform = TimeUniform { time: 0.0 };
+        let time_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Time Buffer"),
+            contents: bytemuck::cast_slice(&[time_uniform]),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
+        let time_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                entries: &[wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                }],
+                label: Some("time_bind_group_layout"),
+            });
+
+        let time_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            layout: &time_bind_group_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: time_buffer.as_entire_binding(),
+            }],
+            label: Some("time_bind_group"),
+        });
         
         let (vertex_data, index_data) = create_vertices();
         let num_indices = index_data.len() as u32;
@@ -259,7 +292,7 @@ impl<'a> State<'a> {
 
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("Render Pipeline"),
-            bind_group_layouts: &[&texture_bind_group_layout],
+            bind_group_layouts: &[&texture_bind_group_layout, &time_bind_group_layout],
             push_constant_ranges: &[],
         });
 
@@ -301,6 +334,10 @@ impl<'a> State<'a> {
 
             texture_bind_group,
 
+            time: 0.0,
+            time_buffer,
+            time_bind_group,
+
             window,
         }
     }
@@ -322,8 +359,10 @@ impl<'a> State<'a> {
         false
     }
 
-    fn update(&mut self, _delta_time: Duration) {
-        ()
+    fn update(&mut self, delta_time: Duration) {
+        const SPEED: f32 = 0.2;
+        self.time += SPEED * (delta_time.as_micros() as f32) / 1_000_000.0;
+        self.queue.write_buffer(&self.time_buffer, 0, bytemuck::cast_slice(&[TimeUniform { time: self.time }]));
     }
 
     fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
@@ -354,6 +393,7 @@ impl<'a> State<'a> {
             });
             rpass.set_pipeline(&self.render_pipeline);
             rpass.set_bind_group(0, &self.texture_bind_group, &[]);
+            rpass.set_bind_group(1, &self.time_bind_group, &[]);
             rpass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
             rpass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
             rpass.draw_indexed(0..self.num_indices, 0, 0..1);
@@ -435,8 +475,10 @@ pub fn main() {
     let event_loop = EventLoop::new().unwrap();
     #[allow(unused_mut)]
     // let mut builder = winit::window::WindowBuilder::new().with_inner_size(winit::dpi::LogicalSize::new(600, 600));
+    // let mut builder = winit::window::WindowBuilder::new()
+    //     .with_inner_size(PhysicalSize{height: 1200, width: 1200});
     let mut builder = winit::window::WindowBuilder::new()
-        .with_inner_size(PhysicalSize{height: 1200, width: 1200});
+        .with_fullscreen(Some(winit::window::Fullscreen::Borderless(None)));
     #[cfg(target_arch = "wasm32")]
     {
         use wasm_bindgen::JsCast;
