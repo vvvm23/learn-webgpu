@@ -1,3 +1,5 @@
+use image;
+use image::GenericImageView;
 use std::borrow::Cow;
 use winit::{
     event::{ElementState, Event, KeyEvent, WindowEvent},
@@ -15,26 +17,34 @@ use winit::dpi::PhysicalSize;
 #[derive(Clone, Copy, Pod, Zeroable)]
 struct Vertex {
     pos: [f32; 4],
+    tex_coords: [f32; 2],
 }
 
 
-fn create_vertex(pos: [f32; 2]) -> Vertex {
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+struct TimeUniform {
+    time: f32,
+}
+
+fn create_vertex(pos: [f32; 2], tex: [f32; 2]) -> Vertex {
     Vertex {
         pos: [
             pos[0],
             pos[1],
             0.0,
             1.0,
-        ]
+        ],
+        tex_coords: tex
     }
 }
 
 fn create_vertices() -> (Vec<Vertex>, Vec<u16>) {
     let vertices = vec![
-        create_vertex([-1.0, -1.0]),
-        create_vertex([1.0, -1.0]),
-        create_vertex([-1.0, 1.0]),
-        create_vertex([1.0, 1.0]),
+        create_vertex([-1.0, -1.0], [0.0,0.0]),
+        create_vertex([1.0, -1.0], [1.0, 0.0]),
+        create_vertex([-1.0, 1.0], [0.0, 1.0]),
+        create_vertex([1.0, 1.0], [1.0, 1.0]),
     ];
 
     let indices = vec![0, 1, 2, 3, 2, 1];
@@ -53,6 +63,8 @@ struct State<'a> {
     vertex_buffer: wgpu::Buffer,
     index_buffer: wgpu::Buffer,
     num_indices: u32,
+
+    texture_bind_group: wgpu::BindGroup,
 
     window: &'a Window,
 }
@@ -111,6 +123,101 @@ impl<'a> State<'a> {
         };
         surface.configure(&device, &config);
 
+        let image_bytes = include_bytes!("sander.png");
+        let image = image::load_from_memory(image_bytes).unwrap();
+        let image = image.to_rgba8();
+
+        let image_dimensions = image.dimensions();
+        let texture_size = wgpu::Extent3d {
+            width: image_dimensions.0,
+            height: image_dimensions.1,
+            depth_or_array_layers: 1,
+        };
+        let image_texture = device.create_texture(
+            &wgpu::TextureDescriptor {
+                size: texture_size,
+                mip_level_count: 1, // We'll talk about this a little later
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba8UnormSrgb,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                label: Some("diffuse_texture"),
+                view_formats: &[],
+            }
+        );
+
+        queue.write_texture(
+            // Tells wgpu where to copy the pixel data
+            wgpu::ImageCopyTexture {
+                texture: &image_texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            // The actual pixel data
+            &image,
+            // The layout of the texture
+            wgpu::ImageDataLayout {
+                offset: 0,
+                bytes_per_row: Some(4 * image_dimensions.0),
+                rows_per_image: Some(image_dimensions.1),
+            },
+            texture_size,
+        );
+        
+        let image_texture_view = image_texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let image_texture_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Nearest,
+            mipmap_filter: wgpu::FilterMode::Nearest,
+            ..Default::default()
+        });
+         
+        let texture_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        multisampled: false,
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    // This should match the filterable field of the
+                    // corresponding Texture entry above.
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+            ],
+            label: Some("texture_bind_group_layout"),
+        });
+
+        let texture_bind_group = device.create_bind_group(
+            &wgpu::BindGroupDescriptor {
+                layout: &texture_bind_group_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::TextureView(&image_texture_view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Sampler(&image_texture_sampler),
+                    }
+                ],
+                label: Some("diffuse_bind_group"),
+            }
+        );
+
+        
         let (vertex_data, index_data) = create_vertices();
         let num_indices = index_data.len() as u32;
         let vertex_size = mem::size_of::<Vertex>();
@@ -137,7 +244,7 @@ impl<'a> State<'a> {
                     shader_location: 0,
                 },
                 wgpu::VertexAttribute {
-                    format: wgpu::VertexFormat::Float32x4,
+                    format: wgpu::VertexFormat::Float32x2,
                     offset: 4 * 4,
                     shader_location: 1,
                 },
@@ -152,7 +259,7 @@ impl<'a> State<'a> {
 
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("Render Pipeline"),
-            bind_group_layouts: &[],
+            bind_group_layouts: &[&texture_bind_group_layout],
             push_constant_ranges: &[],
         });
 
@@ -191,6 +298,8 @@ impl<'a> State<'a> {
             vertex_buffer,
             index_buffer,
             num_indices,
+
+            texture_bind_group,
 
             window,
         }
@@ -244,6 +353,7 @@ impl<'a> State<'a> {
                 occlusion_query_set: None,
             });
             rpass.set_pipeline(&self.render_pipeline);
+            rpass.set_bind_group(0, &self.texture_bind_group, &[]);
             rpass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
             rpass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
             rpass.draw_indexed(0..self.num_indices, 0, 0..1);
@@ -326,7 +436,7 @@ pub fn main() {
     #[allow(unused_mut)]
     // let mut builder = winit::window::WindowBuilder::new().with_inner_size(winit::dpi::LogicalSize::new(600, 600));
     let mut builder = winit::window::WindowBuilder::new()
-        .with_inner_size(PhysicalSize{height: 600, width: 600});
+        .with_inner_size(PhysicalSize{height: 1200, width: 1200});
     #[cfg(target_arch = "wasm32")]
     {
         use wasm_bindgen::JsCast;
