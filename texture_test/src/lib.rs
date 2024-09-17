@@ -41,10 +41,10 @@ fn create_vertex(pos: [f32; 2], tex: [f32; 2], scale: f32) -> Vertex {
 
 fn create_vertices() -> (Vec<Vertex>, Vec<u16>) {
     let vertices = vec![
-        create_vertex([-1.0, -1.0], [0.0,0.0], 2.0),
+        create_vertex([-1.0, -1.0], [0.0, 0.0], 2.0),
         create_vertex([1.0, -1.0], [1.0, 0.0], 2.0),
-        create_vertex([-1.0, 1.0], [0.0, 1.0], 2.0),
-        create_vertex([1.0, 1.0], [1.0, 1.0], 2.0),
+        create_vertex([-1.0, 1.0], [0.0, 0.2], 2.0),
+        create_vertex([1.0, 1.0], [0.2, 1.5], 2.0),
     ];
 
     let indices = vec![0, 1, 2, 3, 2, 1];
@@ -475,10 +475,10 @@ pub fn main() {
     let event_loop = EventLoop::new().unwrap();
     #[allow(unused_mut)]
     // let mut builder = winit::window::WindowBuilder::new().with_inner_size(winit::dpi::LogicalSize::new(600, 600));
-    // let mut builder = winit::window::WindowBuilder::new()
-    //     .with_inner_size(PhysicalSize{height: 1200, width: 1200});
-    let mut builder = winit::window::WindowBuilder::new()
-        .with_fullscreen(Some(winit::window::Fullscreen::Borderless(None)));
+     let mut builder = winit::window::WindowBuilder::new()
+         .with_inner_size(PhysicalSize{height: 1200, width: 1200});
+    //let mut builder = winit::window::WindowBuilder::new()
+        //.with_fullscreen(Some(winit::window::Fullscreen::Borderless(None)));
     #[cfg(target_arch = "wasm32")]
     {
         use wasm_bindgen::JsCast;
